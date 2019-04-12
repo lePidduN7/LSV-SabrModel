@@ -3,6 +3,7 @@ import numba as nb
 from numba import cfunc, carray, types, vectorize, guvectorize, njit, float64
 import numpy as np
 from scipy import LowLevelCallable
+from scipy.integrate import quad
 
 @njit
 def lv_sigma(u, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0):
@@ -74,5 +75,108 @@ def lamperti_transform_lv_sigma(upper_bound, lower_bound, beta_low, beta_high, e
     u_i = 0.5*((upper_bound - lower_bound)*u_points + (lower_bound + upper_bound))
     f_xi = lv_sigma_vectorized(u_i, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0)
     return (upper_bound - lower_bound)*0.5*np.dot(f_xi, w_i)
+
+
+@njit
+def normal_cdf(x):
+    return 0.5*(1 + math.erf(x/math.sqrt(2)))
+
+@njit
+def gamma_star(lambda_, h_cut, time_to_maturity):
+    h_cut_over_T = h_cut/math.sqrt(time_to_maturity)
+    lambda_sqrT_halves = 0.5*lambda_*math.sqrt(time_to_maturity)
+    lambda_hcut_halves = 0.5*lambda_*h_cut
+
+    N_d1 = normal_cdf(h_cut_over_T - lambda_sqrT_halves)
+    N_d1 *= math.exp(-lambda_hcut_halves)
+
+    N_d2 = normal_cdf(-h_cut_over_T - lambda_sqrT_halves)
+    N_d2 *= math.exp(lambda_hcut_halves)
+
+    expo_factor = math.exp(lambda_*lambda_*time_to_maturity*0.125)
+
+    return expo_factor*(N_d1 + N_d2)
+
+@njit
+def gamma_big(lambda_, k, h_cut, time_to_maturity):
+    if k >= h_cut:
+        exponential = 0.125*lambda_*lambda_*time_to_maturity - 0.5*lambda_*h_cut
+        sqrt_T = math.sqrt(time_to_maturity)
+        d1 = -k/sqrt_T - 0.5*lambda_*sqrt_T
+        return math.exp(exponential)*normal_cdf(d1)
+    else:
+        exponential = 0.125*lambda_*lambda_*time_to_maturity + 0.5*lambda_*h_cut
+        sqrt_T = math.sqrt(time_to_maturity)
+        d1 = k/sqrt_T - 0.5*lambda_*sqrt_T
+        return gamma_star(lambda_, h_cut, time_to_maturity) - math.exp(exponential)*normal_cdf(d1)
+
+
+@njit
+def one_minus_density(strike, forward_rate, time_to_maturity,
+                        alpha, nu, rho):
+    z_k = (strike - forward_rate)*(nu/alpha)
+    xhi_k = math.sqrt(1 - rho*rho + (z_k + rho)*(z_k + rho)) + z_k + rho 
+    xhi_k /= 1 + rho
+
+    h_cut = math.log((1 + rho)/(1 - rho))/(2 * nu)
+
+    gamma = 1.5*gamma_star(nu, h_cut, time_to_maturity) - 0.5*gamma_star(3*nu, h_cut, time_to_maturity)
+
+    E_factor = 0.5*math.exp(nu*nu*time_to_maturity*0.5)/gamma
+
+    E_plus = 3*gamma_star(nu, h_cut + nu*time_to_maturity, time_to_maturity)
+    E_plus -= gamma_star(3*nu, h_cut + nu*time_to_maturity, time_to_maturity)
+    E_plus *= E_factor
+
+    E_minus = 3*gamma_star(nu, h_cut - nu*time_to_maturity, time_to_maturity)
+    E_minus -= gamma_star(3*nu, h_cut - nu*time_to_maturity, time_to_maturity)
+    E_minus *= E_factor
+
+    Gamma = rho + math.sqrt(rho*rho + (1 - rho)*(1 - rho)*E_plus*E_minus)
+    Gamma *= (1 + rho)*E_plus
+
+    k = math.log(xhi_k/Gamma)/nu
+
+    out = 1.25*gamma_big(nu, k, h_cut, time_to_maturity)
+    out -= 0.5*gamma_big(3*nu, k, h_cut, time_to_maturity)
+    return out/gamma
+
+@njit
+def call_density(strike, forward_rate, time_to_maturity,
+                alpha, nu, rho, mu,
+                beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    displaced_strike = lamperti_transform_lv_sigma(strike, forward_rate, 
+                                                    beta_low, beta_high, eps, eps_s, 
+                                                    f_low, f_high, lambda_, Psi, K_h, forward_rate)
+    displaced_strike += mu
+    return one_minus_density(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
+
+@njit
+def put_density(strike, forward_rate, time_to_maturity,
+                alpha, nu, rho, mu,
+                beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    displaced_strike = lamperti_transform_lv_sigma(strike, forward_rate, 
+                                                    beta_low, beta_high, eps, eps_s, 
+                                                    f_low, f_high, lambda_, Psi, K_h, forward_rate)
+    displaced_strike += mu
+    return 1 - one_minus_density(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
+    
+def call_terminal_value(strike, forward_rate, time_to_maturity,
+                        alpha, nu, rho, mu,
+                        beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    extra_args = (forward_rate, time_to_maturity, 
+                    alpha, nu, rho, mu, 
+                    beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h)
+    return quad(call_density, a=strike, b=np.inf, args=extra_args)
+
+def put_terminal_value(strike, forward_rate, time_to_maturity,
+                        alpha, nu, rho, mu,
+                        beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    extra_args = (forward_rate, time_to_maturity, 
+                    alpha, nu, rho, mu, 
+                    beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h)
+    return quad(put_density, a=-np.inf, b=strike, args=extra_args)
+
+
 
 

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import quad, fixed_quad
 from src.numerix import lv_sigma, lv_sigma_vectorized, lamperti_transform_lv_sigma, lv_sigma_integrand_scipy
+from src.numerix import call_density, put_density
+from src.numerix import call_terminal_value, put_terminal_value
 
 @dataclass
 class TestData:
@@ -46,6 +48,19 @@ def test_functions_return_value(load_basic_data):
     except:
         raise RuntimeError
 
+def test_density_return_value(load_basic_data):
+    option_strike = 0.04
+    f0 = load_basic_data.forward_rate
+    extra_args = load_basic_data.get_params()
+    a, v, p = 0.00533, 0.165, 0.07
+    ttm = 1.0
+    try:
+        call_density(f0, f0, ttm, a, v, p, *extra_args)
+        put_density(f0, f0, ttm, a, v, p, *extra_args)
+    except:
+        raise RuntimeError
+
+
 def test_integration_returns_close_values(load_basic_data):
     f = 0.04
     f0 = load_basic_data.forward_rate
@@ -78,9 +93,54 @@ def time_compute_local_volatility_lamperti_transform():
     print(local_vols_scipy)
     print(local_vols_numba)
     print(datetime.now() - now)
+
+def time_compute_call_and_put_density():
+    bl, bh, e, es = 0.265, 0.0, 0.0032, 0.001
+    lmbd = 0.5
+    psi = 47.7
+    F0 = 0.01833
+    fl = -0.03
+    fh = F0 + 0.5
+    kh = F0 + 0.08
+    test_data = TestData(bl, bh, e, es, psi, kh, lmbd, fl, fh, F0)
+
+    extra_args = test_data.get_params()
+
+    a, v, p, m = 0.00533, 0.165, 0.07, 0.01
+    ttm = 1.0
+
+    now = datetime.now()
+    print(call_density(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
+    print(put_density(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
+    print(datetime.now() - now)
+ 
+def time_compute_call_and_put_terminal_values():
+    bl, bh, e, es = 0.265, 0.0, 0.0032, 0.001
+    lmbd = 0.5
+    psi = 47.7
+    F0 = 0.01833
+    fl = -0.03
+    fh = F0 + 0.5
+    kh = F0 + 0.08
+    option_strike = 0.03
+    test_data = TestData(bl, bh, e, es, psi, kh, lmbd, fl, fh, F0)
+
+    extra_args = test_data.get_params()
+
+    a, v, p, m = 0.00533, 0.165, 0.07, 0.01
+    ttm = 1.0
+
+    now = datetime.now()
+    print(call_terminal_value(option_strike, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
+    print(put_terminal_value(option_strike, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
+    print(datetime.now() - now)
+ 
     
 
 
 if __name__ == '__main__':
-    time_compute_local_volatility_lamperti_transform()
+    # time_compute_local_volatility_lamperti_transform()
+    time_compute_call_and_put_density()
+    print()
+    time_compute_call_and_put_terminal_values()
 
