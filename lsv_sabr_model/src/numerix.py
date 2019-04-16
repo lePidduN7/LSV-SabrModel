@@ -8,7 +8,7 @@ from scipy.integrate import quad
 @njit
 def lv_sigma(u, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0):
     """
-    Argument of the Lamperti's transform that return the local displacement
+    Argument of the Lamperti's transform that returns the local displacement
     of the stochastic volatility function.
     """
     sigma_argument = min(max(u, f_low), f_high)
@@ -20,6 +20,10 @@ def lv_sigma(u, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_
 
 @njit
 def lv_sigma_vectorized(u_array, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0):
+    """
+    Argument of the Lamperti's transform that returns the local displacement
+    of the stochastic volatility function. Vectorized version
+    """
     sigma_output = np.zeros(len(u_array))
     for i, u in enumerate(u_array):
         sigma_output[i] = lv_sigma(u, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0)
@@ -40,9 +44,12 @@ def lv_sigma_cfunc(n, xx):
 
 lv_sigma_integrand_scipy = LowLevelCallable(lv_sigma_cfunc.ctypes)
 
-
 @njit
 def lamperti_transform_lv_sigma(upper_bound, lower_bound, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0):
+    """
+    Local volatility function obtained as Lamperti's transform of the
+    underlying displacement function.
+    """
     u_points = np.array(
         [-0.99930504, -0.99634012, -0.99101337, -0.98333625, -0.97332683,
        -0.9610088 , -0.94641137, -0.92956917, -0.91052214, -0.88931545,
@@ -76,13 +83,19 @@ def lamperti_transform_lv_sigma(upper_bound, lower_bound, beta_low, beta_high, e
     f_xi = lv_sigma_vectorized(u_i, beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h, F0)
     return (upper_bound - lower_bound)*0.5*np.dot(f_xi, w_i)
 
-
 @njit
 def normal_cdf(x):
+    """
+    Cumulative distribution function of a standard Normal random variable.
+    """
     return 0.5*(1 + math.erf(x/math.sqrt(2)))
 
 @njit
 def gamma_star(lambda_, h_cut, time_to_maturity):
+    """
+    Auxiliary function for the computation of the CDF of the underlying 
+    under displaced-stochastic volatility model. Refer to (18) in Bang (2018).
+    """
     h_cut_over_T = h_cut/math.sqrt(time_to_maturity)
     lambda_sqrT_halves = 0.5*lambda_*math.sqrt(time_to_maturity)
     lambda_hcut_halves = 0.5*lambda_*h_cut
@@ -99,7 +112,11 @@ def gamma_star(lambda_, h_cut, time_to_maturity):
 
 @njit
 def gamma_big(lambda_, k, h_cut, time_to_maturity):
-    if k >= h_cut:
+    """
+    Auxiliary function for the computation of the CDF of the underlying 
+    under displaced-stochastic volatility model. Refer to (19) in Bang (2018).
+    """
+    if k >= -   h_cut:
         exponential = 0.125*lambda_*lambda_*time_to_maturity - 0.5*lambda_*h_cut
         sqrt_T = math.sqrt(time_to_maturity)
         d1 = -k/sqrt_T - 0.5*lambda_*sqrt_T
@@ -110,10 +127,13 @@ def gamma_big(lambda_, k, h_cut, time_to_maturity):
         d1 = k/sqrt_T - 0.5*lambda_*sqrt_T
         return gamma_star(lambda_, h_cut, time_to_maturity) - math.exp(exponential)*normal_cdf(d1)
 
-
 @njit
-def one_minus_density(strike, forward_rate, time_to_maturity,
-                        alpha, nu, rho):
+def one_minus_CDF(strike, forward_rate, time_to_maturity,
+                    alpha, nu, rho):
+    """
+    CDF of the process underlying the Sabr normal approximation
+    by Bang (2018).
+    """
     z_k = (strike - forward_rate)*(nu/alpha)
     xhi_k = math.sqrt(1 - rho*rho + (z_k + rho)*(z_k + rho)) + z_k + rho 
     xhi_k /= 1 + rho
@@ -142,40 +162,53 @@ def one_minus_density(strike, forward_rate, time_to_maturity,
     return out/gamma
 
 @njit
-def call_density(strike, forward_rate, time_to_maturity,
-                alpha, nu, rho, mu,
-                beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+def one_minus_CDF_underlying(strike, forward_rate, time_to_maturity,
+                                alpha, nu, rho, mu,
+                                beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    """
+    CDF of the locally displaced underlyng process in the LV-Sabr model
+    by Bang et al.
+    """
     displaced_strike = lamperti_transform_lv_sigma(strike, forward_rate, 
                                                     beta_low, beta_high, eps, eps_s, 
                                                     f_low, f_high, lambda_, Psi, K_h, forward_rate)
     displaced_strike += mu
-    return one_minus_density(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
+    return one_minus_CDF(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
 
 @njit
-def put_density(strike, forward_rate, time_to_maturity,
-                alpha, nu, rho, mu,
-                beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+def CDF_underlying(strike, forward_rate, time_to_maturity,
+                    alpha, nu, rho, mu,
+                    beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
     displaced_strike = lamperti_transform_lv_sigma(strike, forward_rate, 
                                                     beta_low, beta_high, eps, eps_s, 
                                                     f_low, f_high, lambda_, Psi, K_h, forward_rate)
     displaced_strike += mu
-    return 1 - one_minus_density(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
-    
+    return 1.0 - one_minus_CDF(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
+
+
 def call_terminal_value(strike, forward_rate, time_to_maturity,
                         alpha, nu, rho, mu,
                         beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    """
+    Undiscounted value of the Call price under the LV-Sabr model 
+    by Bang (2018).
+    """
     extra_args = (forward_rate, time_to_maturity, 
                     alpha, nu, rho, mu, 
                     beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h)
-    return quad(call_density, a=strike, b=np.inf, args=extra_args)
+    return quad(one_minus_CDF_underlying, a=strike, b=np.inf, args=extra_args)
 
 def put_terminal_value(strike, forward_rate, time_to_maturity,
                         alpha, nu, rho, mu,
                         beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
+    """
+    Undiscounted value of the Put price under the LV-Sabr model
+    by Bang (2018).
+    """
     extra_args = (forward_rate, time_to_maturity, 
                     alpha, nu, rho, mu, 
                     beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h)
-    return quad(put_density, a=-np.inf, b=strike, args=extra_args)
+    return quad(CDF_underlying, a=-np.inf, b=strike, args=extra_args)
 
 
 

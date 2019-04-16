@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import quad, fixed_quad
 from src.numerix import lv_sigma, lv_sigma_vectorized, lamperti_transform_lv_sigma, lv_sigma_integrand_scipy
-from src.numerix import call_density, put_density
+from src.numerix import one_minus_CDF_underlying, CDF_underlying
 from src.numerix import call_terminal_value, put_terminal_value
 
 @dataclass
@@ -55,8 +55,8 @@ def test_density_return_value(load_basic_data):
     a, v, p = 0.00533, 0.165, 0.07
     ttm = 1.0
     try:
-        call_density(f0, f0, ttm, a, v, p, *extra_args)
-        put_density(f0, f0, ttm, a, v, p, *extra_args)
+        one_minus_CDF_underlying(f0, f0, ttm, a, v, p, *extra_args)
+        CDF_underlying(f0, f0, ttm, a, v, p, *extra_args)
     except:
         raise RuntimeError
 
@@ -110,8 +110,11 @@ def time_compute_call_and_put_density():
     ttm = 1.0
 
     now = datetime.now()
-    print(call_density(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
-    print(put_density(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh))
+    one_minus_cdf = one_minus_CDF_underlying(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh)
+    cdf_underlying = CDF_underlying(F0, F0, ttm, a, v, p, m, bl, bh, e, es, fl, fh, lmbd, psi, kh)
+    print(one_minus_cdf)
+    print(cdf_underlying)
+    print(one_minus_cdf + cdf_underlying)
     print(datetime.now() - now)
  
 def time_compute_call_and_put_terminal_values():
