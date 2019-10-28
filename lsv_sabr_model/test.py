@@ -67,7 +67,7 @@ def test_integration_returns_close_values(load_basic_data):
     extra_args = load_basic_data.get_params()
     my_value = lamperti_transform_lv_sigma(f, f0, *extra_args)
     quad_value = quad(lv_sigma, f0, f, args=extra_args)[0]
-    assert math.isclose(my_value, quad_value)
+    assert math.isclose(my_value, quad_value, rel_tol=1e-8, abs_tol=1e-12)
 
 
 def time_compute_local_volatility_lamperti_transform():

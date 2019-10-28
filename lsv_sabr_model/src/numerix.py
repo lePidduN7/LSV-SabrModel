@@ -35,7 +35,7 @@ def lamperti_transform_lv_sigma(upper_bound, lower_bound, beta_low, beta_high, e
     Local volatility function obtained as Lamperti's transform of the
     underlying displacement function. Def Int_F0^f(1/(sigma(u)))du 
     pag 2 in Bang(2018). This function performs the integral numerically
-    with a Gaussian Quadrature over 64 points. Points and weights in the
+    with a Gaussian Quadrature over 128 points. Points and weights in the
     (1, 1) interval are cached. The integral is then computed by changing 
     the integration interval from (-1, 1) to (lower_bound, upper_bound).
     """
@@ -178,7 +178,7 @@ def one_minus_CDF(strike, forward_rate, time_to_maturity,
     out -= 0.5*gamma_big(3*nu, k, h_cut, time_to_maturity)
     return out/gamma
 
-@njit
+@njit(cache=True)
 def one_minus_CDF_underlying(strike, forward_rate, time_to_maturity,
                                 alpha, nu, rho, mu,
                                 beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
@@ -192,7 +192,7 @@ def one_minus_CDF_underlying(strike, forward_rate, time_to_maturity,
     displaced_strike = G_k + mu
     return one_minus_CDF(displaced_strike, forward_rate, time_to_maturity, alpha, nu, rho)
 
-@njit
+@njit(cache=True)
 def CDF_underlying(strike, forward_rate, time_to_maturity,
                     alpha, nu, rho, mu,
                     beta_low, beta_high, eps, eps_s, f_low, f_high, lambda_, Psi, K_h):
